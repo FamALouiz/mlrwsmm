@@ -53,14 +53,21 @@ int main()
     }
 
     // Create the rest of the processes
-    info("Creating Writer 2...");
-    createWriterProcess(2);
+    for (int i = 2; i <= NUM_WRITERS; i++)
+    {
+        char writerMsg[100];
+        sprintf(writerMsg, "Creating Writer %d...", i);
+        info(writerMsg);
+        createWriterProcess(i);
+    }
 
-    info("Creating Reader 1...");
-    createReaderProcess(1);
-
-    info("Creating Reader 2...");
-    createReaderProcess(2);
+    for (int i = 1; i <= NUM_READERS; i++)
+    {
+        char readerMsg[100];
+        sprintf(readerMsg, "Creating Reader %d...", i);
+        info(readerMsg);
+        createReaderProcess(i);
+    }
 
     // Main menu loop
     char choice;
