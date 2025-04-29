@@ -1,29 +1,29 @@
-#include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
-#include "..\include\common.h"
-#include "..\include\log\logger.h"
+#include <string.h>
+#include "../include/common.h"
+#include "../include/log/logger.h"
+#include "../include/platform/process.h"
+#include "../include/platform/shared_memory.h"
+#include "../include/platform/sync.h"
+#include "../include/path/path.h"
 
 #define MAX_COMMAND_LENGTH 256
 #define NUM_WRITERS 2
 #define NUM_READERS 2
 
-// Process management structure
 typedef struct
 {
-    HANDLE hProcess;
-    HANDLE hThread;
+    ProcessHandle *handle;
     int id;
     char type; // 'R' for reader, 'W' for writer
     bool isActive;
 } ProcessInfo;
 
-// Global array to store process information
 ProcessInfo processes[NUM_WRITERS + NUM_READERS];
 int processCount = 0;
 
-// Function prototypes
 bool createReaderProcess(int readerId);
 bool createWriterProcess(int writerId);
 void displayMenu();
@@ -32,19 +32,16 @@ void togglePriority();
 
 int main()
 {
-    // Initialize the logger with terminal output and INFO verbosity
     init_logger(LOG_TO_TERMINAL_ONLY, LOG_VERBOSITY_INFO);
 
     info("Multi-level Reader-Writer Synchronization and Memory Management");
     info("==============================================================");
 
-    // Initialize the processes array
     for (int i = 0; i < NUM_WRITERS + NUM_READERS; i++)
     {
-        processes[i].isActive = false;
+        processes[i].isActive = 0;
     }
 
-    // Create initial writer processes - we need at least one writer to initialize shared memory
     info("Creating Writer 1 to initialize shared memory...");
     if (!createWriterProcess(1))
     {
@@ -52,7 +49,6 @@ int main()
         return 1;
     }
 
-    // Create the rest of the processes
     for (int i = 2; i <= NUM_WRITERS; i++)
     {
         char writerMsg[100];
@@ -69,9 +65,8 @@ int main()
         createReaderProcess(i);
     }
 
-    // Main menu loop
     char choice;
-    bool running = true;
+    bool running = 1;
 
     while (running)
     {
@@ -82,32 +77,28 @@ int main()
         switch (choice)
         {
         case '1':
-            // Launch a new reader process
-            {
-                int id;
-                info("Enter reader ID: ");
-                scanf("%d", &id);
-                createReaderProcess(id);
-            }
-            break;
+        {
+            int id;
+            info("Enter reader ID: ");
+            scanf("%d", &id);
+            createReaderProcess(id);
+        }
+        break;
 
         case '2':
-            // Launch a new writer process
-            {
-                int id;
-                info("Enter writer ID: ");
-                scanf("%d", &id);
-                createWriterProcess(id);
-            }
-            break;
+        {
+            int id;
+            info("Enter writer ID: ");
+            scanf("%d", &id);
+            createWriterProcess(id);
+        }
+        break;
 
         case '3':
-            // Toggle priority mode
             togglePriority();
             break;
 
         case '4':
-            // Display active processes
             info("\nActive Processes:");
             for (int i = 0; i < processCount; i++)
             {
@@ -116,7 +107,7 @@ int main()
                     char processInfo[100];
                     sprintf(processInfo, "%c Process %d (PID: %lu)",
                             processes[i].type, processes[i].id,
-                            GetProcessId(processes[i].hProcess));
+                            get_process_id(processes[i].handle));
                     info(processInfo);
                 }
             }
@@ -124,37 +115,35 @@ int main()
             break;
 
         case '5':
-            // Terminate a specific process
+        {
+            int index;
+            info("Enter process index to terminate (from list): ");
+            scanf("%d", &index);
+
+            if (index >= 0 && index < processCount && processes[index].isActive)
             {
-                int index;
-                info("Enter process index to terminate (from list): ");
-                scanf("%d", &index);
+                char terminateMsg[100];
+                sprintf(terminateMsg, "Terminating %c Process %d...",
+                        processes[index].type, processes[index].id);
+                info(terminateMsg);
 
-                if (index >= 0 && index < processCount && processes[index].isActive)
-                {
-                    char terminateMsg[100];
-                    sprintf(terminateMsg, "Terminating %c Process %d...",
-                            processes[index].type, processes[index].id);
-                    info(terminateMsg);
+                terminate_process(processes[index].handle);
+                close_process_handle(processes[index].handle);
+                processes[index].isActive = 0;
 
-                    TerminateProcess(processes[index].hProcess, 0);
-                    CloseHandle(processes[index].hProcess);
-                    CloseHandle(processes[index].hThread);
-                    processes[index].isActive = false;
-
-                    info("Process terminated.");
-                }
-                else
-                {
-                    warn("Invalid process index.");
-                }
+                info("Process terminated.");
             }
-            break;
+            else
+            {
+                warn("Invalid process index.");
+            }
+        }
+        break;
 
         case 'q':
         case 'Q':
             info("Terminating all processes and exiting...");
-            running = false;
+            running = 0;
             break;
 
         default:
@@ -162,11 +151,9 @@ int main()
         }
     }
 
-    // Cleanup
     cleanupProcesses();
     info("All processes terminated. Goodbye!");
 
-    // Close the logger before exiting
     close_logger();
 
     return 0;
@@ -174,124 +161,94 @@ int main()
 
 bool createReaderProcess(int readerId)
 {
-    STARTUPINFO si = {sizeof(si)};
-    PROCESS_INFORMATION pi;
-
-    // Build command line with reader ID
     char command[MAX_COMMAND_LENGTH];
-    sprintf_s(command, MAX_COMMAND_LENGTH, "build\\bin\\reader.exe %d", readerId);
 
-    // Create the reader process
-    if (!CreateProcess(NULL, command, NULL, NULL, FALSE,
-                       CREATE_NEW_CONSOLE, NULL, NULL, &si, &pi))
+    const char *pathParts[] = {"build", "bin", "reader.exe"};
+    char exePath[MAX_COMMAND_LENGTH];
+    join_paths(exePath, 3, pathParts);
+
+    sprintf(command, "%s %d", exePath, readerId);
+
+    ProcessHandle *handle = NULL;
+    if (!create_process(command, readerId, 'R', &handle))
     {
         char errorMsg[100];
-        sprintf(errorMsg, "CreateProcess failed for reader %d (%lu).", readerId, GetLastError());
+        sprintf(errorMsg, "Process creation failed for reader %d.", readerId);
         error(errorMsg);
-        return false;
+        return 0;
     }
 
-    // Store process information
-    processes[processCount].hProcess = pi.hProcess;
-    processes[processCount].hThread = pi.hThread;
+    processes[processCount].handle = handle;
     processes[processCount].id = readerId;
     processes[processCount].type = 'R';
-    processes[processCount].isActive = true;
+    processes[processCount].isActive = 1;
     processCount++;
 
     char successMsg[100];
     sprintf(successMsg, "Reader %d started successfully.", readerId);
     info(successMsg);
-    return true;
+    return 1;
 }
 
 bool createWriterProcess(int writerId)
 {
-    STARTUPINFO si = {sizeof(si)};
-    PROCESS_INFORMATION pi;
-
-    // Build command line with writer ID
     char command[MAX_COMMAND_LENGTH];
-    sprintf_s(command, MAX_COMMAND_LENGTH, "build\\bin\\writer.exe %d", writerId);
 
-    // Create the writer process
-    if (!CreateProcess(NULL, command, NULL, NULL, FALSE,
-                       CREATE_NEW_CONSOLE, NULL, NULL, &si, &pi))
+    const char *pathParts[] = {"build", "bin", "writer.exe"};
+    char exePath[MAX_COMMAND_LENGTH];
+    join_paths(exePath, 3, pathParts);
+
+    sprintf(command, "%s %d", exePath, writerId);
+
+    ProcessHandle *handle = NULL;
+    if (!create_process(command, writerId, 'W', &handle))
     {
         char errorMsg[100];
-        sprintf(errorMsg, "CreateProcess failed for writer %d (%lu).", writerId, GetLastError());
+        sprintf(errorMsg, "Process creation failed for writer %d.", writerId);
         error(errorMsg);
-        return false;
+        return 0;
     }
 
-    // Store process information
-    processes[processCount].hProcess = pi.hProcess;
-    processes[processCount].hThread = pi.hThread;
+    processes[processCount].handle = handle;
     processes[processCount].id = writerId;
     processes[processCount].type = 'W';
-    processes[processCount].isActive = true;
+    processes[processCount].isActive = 1;
     processCount++;
 
     char successMsg[100];
     sprintf(successMsg, "Writer %d started successfully.", writerId);
     info(successMsg);
-    return true;
+    return 1;
 }
 
 void togglePriority()
 {
-    // Open shared memory to access the priority flag
-    HANDLE hMapFile = OpenFileMapping(
-        FILE_MAP_ALL_ACCESS,     // Read/write access
-        FALSE,                   // Do not inherit the name
-        TEXT(SHARED_MEMORY_NAME) // Name of mapping object
-    );
-
+    SharedMemoryHandle *hMapFile = open_shared_memory(SHARED_MEMORY_NAME);
     if (hMapFile == NULL)
     {
-        char errorMsg[100];
-        sprintf(errorMsg, "Could not open file mapping object (%lu).", GetLastError());
-        error(errorMsg);
+        error("Could not open shared memory object.");
         warn("Make sure at least one writer or reader is running.");
         return;
     }
 
-    // Map the shared memory
-    SharedData *sharedData = (SharedData *)MapViewOfFile(
-        hMapFile,
-        FILE_MAP_ALL_ACCESS,
-        0,
-        0,
-        SHARED_MEM_SIZE);
-
+    SharedData *sharedData = (SharedData *)map_shared_memory(hMapFile, SHARED_MEM_SIZE);
     if (sharedData == NULL)
     {
-        char errorMsg[100];
-        sprintf(errorMsg, "Could not map view of file (%lu).", GetLastError());
-        error(errorMsg);
-        CloseHandle(hMapFile);
+        error("Could not map shared memory.");
+        close_shared_memory(hMapFile);
         return;
     }
 
-    // Open priority mutex
-    HANDLE priorityMutex = OpenMutex(
-        SYNCHRONIZE,              // Access right
-        FALSE,                    // Don't inherit
-        TEXT(PRIORITY_MUTEX_NAME) // Name
-    );
-
+    MutexHandle *priorityMutex = open_mutex(PRIORITY_MUTEX_NAME);
     if (priorityMutex == NULL)
     {
-        char errorMsg[100];
-        sprintf(errorMsg, "Could not open priority mutex (%lu).", GetLastError());
-        error(errorMsg);
-        UnmapViewOfFile(sharedData);
-        CloseHandle(hMapFile);
+        error("Could not open priority mutex.");
+        unmap_shared_memory(sharedData);
+        close_shared_memory(hMapFile);
         return;
     }
 
-    // Toggle the priority mode
-    WaitForSingleObject(priorityMutex, INFINITE);
+    lock_mutex(priorityMutex);
     sharedData->isPriorityWriter = !sharedData->isPriorityWriter;
 
     char priorityMsg[100];
@@ -299,12 +256,11 @@ void togglePriority()
             sharedData->isPriorityWriter ? "WRITER" : "READER");
     info(priorityMsg);
 
-    ReleaseMutex(priorityMutex);
+    unlock_mutex(priorityMutex);
 
-    // Clean up
-    UnmapViewOfFile(sharedData);
-    CloseHandle(priorityMutex);
-    CloseHandle(hMapFile);
+    close_mutex(priorityMutex);
+    unmap_shared_memory(sharedData);
+    close_shared_memory(hMapFile);
 }
 
 void displayMenu()
@@ -324,9 +280,9 @@ void cleanupProcesses()
     {
         if (processes[i].isActive)
         {
-            TerminateProcess(processes[i].hProcess, 0);
-            CloseHandle(processes[i].hProcess);
-            CloseHandle(processes[i].hThread);
+            terminate_process(processes[i].handle);
+            close_process_handle(processes[i].handle);
+            processes[i].isActive = 0;
         }
     }
 }
