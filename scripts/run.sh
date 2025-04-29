@@ -1,29 +1,33 @@
 #!/bin/bash
 
-echo "Multi-level Reader-Writer Synchronization and Memory Management System"
-echo "Building and running project..."
-echo ""
+# Script for building and running the mlrwsmm project on UNIX-like systems
+# Make sure this script has execute permissions: chmod +x run.sh
+
+# Exit on any error
+set -e
+
+echo "Building Multi-level Reader-Writer Synchronization and Memory Management..."
 
 # Create build directory if it doesn't exist
-if [ ! -d "./build" ]; then
-  mkdir -p "./build"
+if [ ! -d "../build" ]; then
+  mkdir -p ../build
 fi
 
-# Navigate to the build directory
-cd "./build"
+# Navigate to build directory
+cd ../build
+
+# Run CMake
+echo "Running CMake..."
+cmake ..
 
 # Build the project
 echo "Building project..."
-cmake ..
 cmake --build .
 
-# Run the main executable
-echo ""
-echo "Running main application..."
-echo ""
+# Navigate back to project root
 cd ..
-./build/bin/main
 
-echo ""
-echo "Script execution completed."
-read -p "Press Enter to continue..."
+echo "Build complete! Running main controller..."
+
+# Run the main controller
+./build/bin/main
