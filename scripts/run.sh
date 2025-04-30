@@ -9,12 +9,12 @@ set -e
 echo "Building Multi-level Reader-Writer Synchronization and Memory Management..."
 
 # Create build directory if it doesn't exist
-if [ ! -d "../build" ]; then
-  mkdir -p ../build
+if [ ! -d "build" ]; then
+  mkdir -p build
 fi
 
 # Navigate to build directory
-cd ../build
+cd build
 
 # Run CMake
 echo "Running CMake..."

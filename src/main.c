@@ -163,7 +163,11 @@ bool createReaderProcess(int readerId)
 {
     char command[MAX_COMMAND_LENGTH];
 
-    const char *pathParts[] = {"build", "bin", "reader.exe"};
+    #if defined(_WIN32)
+    const char *pathParts[] = {"build", "bin", "writer.exe"};
+    #else
+    const char *pathParts[] = {"build", "bin", "writer"};
+    #endif
     char exePath[MAX_COMMAND_LENGTH];
     join_paths(exePath, 3, pathParts);
 
@@ -194,7 +198,11 @@ bool createWriterProcess(int writerId)
 {
     char command[MAX_COMMAND_LENGTH];
 
+    #if defined(_WIN32)
     const char *pathParts[] = {"build", "bin", "writer.exe"};
+    #else
+    const char *pathParts[] = {"build", "bin", "writer"};
+    #endif
     char exePath[MAX_COMMAND_LENGTH];
     join_paths(exePath, 3, pathParts);
 
