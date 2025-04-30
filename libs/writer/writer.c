@@ -1,166 +1,140 @@
-#include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
-#include "..\..\include\common.h"
-#include "..\..\include\log\logger.h"
+#include "../../include/common.h"
+#include "../../include/log/logger.h"
+#include "../../include/platform/shared_memory.h"
+#include "../../include/platform/sync.h"
 
-// Global handles for synchronization
-HANDLE hMapFile;
-HANDLE mutexHandle;
-HANDLE writerSemaphore;
-HANDLE readerSemaphore;
-HANDLE priorityMutex;
+SharedMemoryHandle *sharedMemoryHandle;
+MutexHandle *mutexHandle;
+SemaphoreHandle *writerSemaphore;
+SemaphoreHandle *readerSemaphore;
+MutexHandle *priorityMutex;
 SharedData *sharedData;
+
+const char *messageTemplates[] = {
+    "Hello from Writer %d! This is message #%d.",
+    "Writer %d checking in with update #%d.",
+    "Breaking news from Writer %d: Message #%d has arrived!",
+    "Writer %d strikes again with message #%d!",
+    "This is Writer %d broadcasting message #%d."};
 
 void cleanup()
 {
     if (sharedData)
-        UnmapViewOfFile(sharedData);
-    if (hMapFile)
-        CloseHandle(hMapFile);
+        unmap_shared_memory(sharedData);
+    if (sharedMemoryHandle)
+        close_shared_memory(sharedMemoryHandle);
     if (mutexHandle)
-        CloseHandle(mutexHandle);
+        close_mutex(mutexHandle);
     if (writerSemaphore)
-        CloseHandle(writerSemaphore);
+        close_semaphore(writerSemaphore);
     if (readerSemaphore)
-        CloseHandle(readerSemaphore);
+        close_semaphore(readerSemaphore);
     if (priorityMutex)
-        CloseHandle(priorityMutex);
+        close_mutex(priorityMutex);
+}
+
+void generateMessage(int writerId, int messageCount, char *buffer, int bufferSize)
+{
+    int templateIndex = rand() % (sizeof(messageTemplates) / sizeof(messageTemplates[0]));
+    snprintf(buffer, bufferSize, messageTemplates[templateIndex], writerId, messageCount);
 }
 
 int main(int argc, char *argv[])
 {
-    int writerId = 1; // Default writer ID
+    int writerId = 1;
 
-    // If we have a command line argument, use it as the writer ID
     if (argc > 1)
     {
         writerId = atoi(argv[1]);
     }
 
-    // Initialize the logger with terminal output and INFO verbosity
     init_logger(LOG_TO_TERMINAL_ONLY, LOG_VERBOSITY_INFO);
 
-    // Set random seed for message generation
     srand((unsigned int)time(NULL) + writerId);
-
-    // Create or open the shared memory
-    hMapFile = CreateFileMapping(
-        INVALID_HANDLE_VALUE,    // Not using a file
-        NULL,                    // Default security attributes
-        PAGE_READWRITE,          // Read/write access
-        0,                       // High-order size
-        SHARED_MEM_SIZE,         // Low-order size
-        TEXT(SHARED_MEMORY_NAME) // Name
-    );
-
-    if (hMapFile == NULL)
-    {
-        char errorMsg[100];
-        sprintf(errorMsg, "Writer %d: Could not create file mapping object (%lu).", writerId, GetLastError());
-        error(errorMsg);
-        close_logger();
-        return 1;
-    }
-
-    // Map view of the shared memory
-    sharedData = (SharedData *)MapViewOfFile(
-        hMapFile,
-        FILE_MAP_ALL_ACCESS,
-        0,
-        0,
-        SHARED_MEM_SIZE);
-
-    if (sharedData == NULL)
-    {
-        char errorMsg[100];
-        sprintf(errorMsg, "Writer %d: Could not map view of file (%lu).", writerId, GetLastError());
-        error(errorMsg);
-        CloseHandle(hMapFile);
-        close_logger();
-        return 1;
-    }
-
-    // Create synchronization objects
-    mutexHandle = CreateMutex(
-        NULL,            // Default security
-        FALSE,           // Initially not owned
-        TEXT(MUTEX_NAME) // Name
-    );
-
-    writerSemaphore = CreateSemaphore(
-        NULL,
-        1,                          // Initial count (1 = free for first writer)
-        1,                          // Max count (only one writer at a time)
-        TEXT(WRITER_SEMAPHORE_NAME) // Name
-    );
-
-    readerSemaphore = CreateSemaphore(
-        NULL,
-        1,                          // Initial count
-        1,                          // Max count
-        TEXT(READER_SEMAPHORE_NAME) // Name
-    );
-
-    priorityMutex = CreateMutex(
-        NULL,                     // Default security
-        FALSE,                    // Initially not owned
-        TEXT(PRIORITY_MUTEX_NAME) // Name
-    );
-
-    // Initialize shared memory if this is the first writer
-    DWORD result = WaitForSingleObject(mutexHandle, INFINITE);
-    if (result == WAIT_OBJECT_0)
-    {
-        if (sharedData->messageId == 0)
-        { // Initial state
-            sharedData->readerCount = 0;
-            sharedData->writerCount = 0;
-            sharedData->waitingWriters = 0;
-            sharedData->waitingReaders = 0;
-            sharedData->isPriorityWriter = 1; // Default to writer priority
-            sharedData->messageId = 0;
-            strcpy_s(sharedData->message, 256, "Shared memory initialized");
-
-            char initMsg[100];
-            sprintf(initMsg, "Writer %d: Initialized shared memory.", writerId);
-            info(initMsg);
-        }
-        ReleaseMutex(mutexHandle);
-    }
-    else
-    {
-        char errorMsg[100];
-        sprintf(errorMsg, "Writer %d: Failed to acquire mutex for initialization (%lu).", writerId, GetLastError());
-        error(errorMsg);
-        cleanup();
-        close_logger();
-        return 1;
-    }
 
     char startMsg[100];
     sprintf(startMsg, "Writer %d: Starting. Press 'q' to quit, 'p' to toggle priority mode.", writerId);
     info(startMsg);
 
-    BOOL running = TRUE;
+    sharedMemoryHandle = open_shared_memory(SHARED_MEMORY_NAME);
+    bool isFirstWriter = 0;
+
+    if (sharedMemoryHandle == NULL)
+    {
+        info("Creating shared memory...");
+        sharedMemoryHandle = create_shared_memory(SHARED_MEMORY_NAME, SHARED_MEM_SIZE);
+        isFirstWriter = 1;
+
+        if (sharedMemoryHandle == NULL)
+        {
+            error("Could not create shared memory. Exiting.");
+            close_logger();
+            return 1;
+        }
+    }
+
+    sharedData = (SharedData *)map_shared_memory(sharedMemoryHandle, SHARED_MEM_SIZE);
+
+    if (sharedData == NULL)
+    {
+        error("Could not map shared memory. Exiting.");
+        close_shared_memory(sharedMemoryHandle);
+        close_logger();
+        return 1;
+    }
+
+    if (isFirstWriter)
+    {
+        info("Initializing shared memory and creating synchronization objects...");
+
+        memset(sharedData, 0, SHARED_MEM_SIZE);
+        sharedData->isPriorityWriter = 0;
+        strcpy(sharedData->message, "Initial message");
+        sharedData->messageId = 0;
+
+        mutexHandle = create_mutex(MUTEX_NAME);
+        writerSemaphore = create_semaphore(WRITER_SEMAPHORE_NAME, 1, 1);
+        readerSemaphore = create_semaphore(READER_SEMAPHORE_NAME, 1, 1);
+        priorityMutex = create_mutex(PRIORITY_MUTEX_NAME);
+    }
+    else
+    {
+        mutexHandle = open_mutex(MUTEX_NAME);
+        writerSemaphore = open_semaphore(WRITER_SEMAPHORE_NAME);
+        readerSemaphore = open_semaphore(READER_SEMAPHORE_NAME);
+        priorityMutex = open_mutex(PRIORITY_MUTEX_NAME);
+    }
+
+    if (mutexHandle == NULL || writerSemaphore == NULL || readerSemaphore == NULL || priorityMutex == NULL)
+    {
+        error("Failed to create or open synchronization objects. Exiting.");
+        cleanup();
+        close_logger();
+        return 1;
+    }
+
+    int messageCount = 0;
+    bool running = 1;
+
     while (running)
     {
         char input = 0;
 
-        // Non-blocking check for keyboard input
-        if (_kbhit())
+        if (kbhit())
         {
-            input = _getch();
+            input = getch();
             if (input == 'q' || input == 'Q')
             {
-                running = FALSE;
+                running = 0;
                 continue;
             }
             else if (input == 'p' || input == 'P')
             {
-                // Toggle priority mode
-                WaitForSingleObject(priorityMutex, INFINITE);
+                lock_mutex(priorityMutex);
                 sharedData->isPriorityWriter = !sharedData->isPriorityWriter;
 
                 char priorityMsg[100];
@@ -169,66 +143,60 @@ int main(int argc, char *argv[])
                         sharedData->isPriorityWriter ? "writer" : "reader");
                 info(priorityMsg);
 
-                ReleaseMutex(priorityMutex);
-                Sleep(1000); // Prevent rapid toggling
+                unlock_mutex(priorityMutex);
+                platform_sleep(1000);
             }
         }
 
-        // Writer logic with priority handling
-        WaitForSingleObject(mutexHandle, INFINITE);
+        lock_mutex(mutexHandle);
         sharedData->waitingWriters++;
-        ReleaseMutex(mutexHandle);
 
-        char waitMsg[100];
-        sprintf(waitMsg, "Writer %d: Waiting to write...", writerId);
-        info(waitMsg);
-
-        // Wait for access based on the priority rules
-        if (sharedData->isPriorityWriter)
+        if (sharedData->readerCount > 0 && !sharedData->isPriorityWriter)
         {
-            // Writer priority: wait for the writer semaphore only
-            WaitForSingleObject(writerSemaphore, INFINITE);
-        }
-        else
-        {
-            // Reader priority: wait for both semaphores
-            WaitForSingleObject(readerSemaphore, INFINITE);
-            WaitForSingleObject(writerSemaphore, INFINITE);
+            char waitMsg[100];
+            sprintf(waitMsg, "Writer %d: Reader priority is active, waiting for readers to finish...", writerId);
+            info(waitMsg);
+            unlock_mutex(mutexHandle);
+            platform_sleep(500);
+            continue;
         }
 
-        // Got access, update waiting count
-        WaitForSingleObject(mutexHandle, INFINITE);
         sharedData->waitingWriters--;
         sharedData->writerCount++;
-        ReleaseMutex(mutexHandle);
 
-        // Write to shared memory
+        unlock_mutex(mutexHandle);
+
+        char acquireMsg[100];
+        sprintf(acquireMsg, "Writer %d: Acquiring exclusive write access...", writerId);
+        info(acquireMsg);
+
+        wait_semaphore(writerSemaphore);
+
+        messageCount++;
+        char newMessage[256];
+        generateMessage(writerId, messageCount, newMessage, sizeof(newMessage));
+
+        strcpy(sharedData->message, newMessage);
         sharedData->messageId++;
-        sprintf_s(sharedData->message, 256, "Message #%d from Writer %d at %lu",
-                  sharedData->messageId, writerId, GetTickCount());
 
-        char writeMsg[256];
-        sprintf(writeMsg, "Writer %d: Wrote message: %s", writerId, sharedData->message);
+        char writeMsg[100];
+        sprintf(writeMsg, "Writer %d: Writing message: %s", writerId, newMessage);
         info(writeMsg);
+        platform_sleep(rand() % 1000 + 500);
 
-        // Simulate writing work
-        Sleep(rand() % 2000 + 1000);
+        release_semaphore(writerSemaphore, 1);
 
-        // Release access
-        WaitForSingleObject(mutexHandle, INFINITE);
+        lock_mutex(mutexHandle);
         sharedData->writerCount--;
 
-        if (!sharedData->isPriorityWriter)
+        if (sharedData->writerCount == 0 && !sharedData->isPriorityWriter)
         {
-            // For reader priority, release the reader semaphore
-            ReleaseSemaphore(readerSemaphore, 1, NULL);
+            release_semaphore(readerSemaphore, 1);
         }
 
-        ReleaseMutex(mutexHandle);
-        ReleaseSemaphore(writerSemaphore, 1, NULL);
+        unlock_mutex(mutexHandle);
 
-        // Random sleep between write operations
-        Sleep(rand() % 3000 + 1000);
+        platform_sleep(rand() % 3000 + 1000);
     }
 
     char terminateMsg[100];
@@ -236,7 +204,6 @@ int main(int argc, char *argv[])
     info(terminateMsg);
     cleanup();
 
-    // Close the logger before exiting
     close_logger();
     return 0;
 }
