@@ -42,6 +42,11 @@ add_library(logger STATIC
     libs/util/path.c
 )
 
+# Create memory manager library
+add_library(memory_manager STATIC
+    libs/memory/memory_manager.c
+)
+
 # Define reader target
 add_executable(reader libs/reader/reader.c)
 set_target_properties(reader PROPERTIES
@@ -57,11 +62,18 @@ set_target_properties(writer PROPERTIES
 # Define main target
 add_executable(main src/main.c)
 
+# Define memory simulator target
+add_executable(memory_simulator src/memory_simulator.c)
+set_target_properties(memory_simulator PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+)
+
 # Link libraries
 target_link_libraries(reader logger platform ${PLATFORM_LIBS})
 target_link_libraries(writer logger platform ${PLATFORM_LIBS})
 target_link_libraries(main logger platform ${PLATFORM_LIBS})
+target_link_libraries(memory_simulator memory_manager logger platform ${PLATFORM_LIBS})
 
 # Install rules
-install(TARGETS reader writer main
+install(TARGETS reader writer main memory_simulator
         RUNTIME DESTINATION bin)
