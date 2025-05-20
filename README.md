@@ -114,6 +114,8 @@ include/
   log/
     logger.h           # Logger interface
     logger_config.h    # Logger configuration definitions
+  memory/
+    memory_manager.h   # Memory management system interface
   path/
     path.h             # Path utilities header
   platform/
@@ -123,6 +125,8 @@ include/
 libs/
   log/
     logger.c           # Logger implementation
+  memory/
+    memory_manager.c   # Memory management system implementation
   platform/
     posix_process.c    # POSIX implementation of process management
     posix_shared_memory.c # POSIX implementation of shared memory
@@ -137,12 +141,19 @@ libs/
   writer/
     writer.c           # Writer process implementation
 scripts/
+  memory_simulator.bat # Windows memory simulator script
+  memory_simulator.sh  # Unix memory simulator script
   run.bat              # Windows build and run script
   run.sh               # Unix build and run script
 src/
   main.c               # Main controller application
+  memory_simulator.c   # Memory management simulator application
 build/                 # Generated build files (after compilation)
   bin/                 # Compiled executables
+    main.exe           # Main controller executable
+    memory_simulator.exe # Memory simulator executable
+    reader.exe         # Reader process executable
+    writer.exe         # Writer process executable
 ```
 
 ## How It Works
@@ -174,3 +185,46 @@ build/                 # Generated build files (after compilation)
 -   Windows implementation: Standard Windows API (kernel32.lib)
 -   POSIX implementation: pthread and rt libraries (linked automatically by CMake)
 -   Standard C library
+
+## Memory Management System
+
+The project also includes a sophisticated memory management simulation system that demonstrates common operating system memory allocation strategies:
+
+### Memory Allocation Strategies
+
+The system supports three memory allocation strategies:
+
+-   **Segmentation**: Memory is divided into variable-sized segments
+-   **Paging**: Memory is divided into fixed-size pages
+-   **Hybrid**: A combination of both segmentation and paging approaches
+
+### Memory Manager Features
+
+-   Process-based memory allocation and deallocation
+-   Segment management with first-fit allocation algorithm
+-   Page table management for virtual-to-physical address translation
+-   Memory fragmentation analysis (internal and external)
+-   Memory visualization tools for debugging and educational purposes
+
+### Memory Simulator
+
+A separate memory simulator application (`memory_simulator.exe`) is included that demonstrates the memory management system:
+
+1. Launch the memory simulator using:
+
+    - Windows: `scripts/memory_simulator.bat`
+    - Unix-like systems: `scripts/memory_simulator.sh`
+
+2. The simulator allows you to:
+    - Create processes with different memory requirements
+    - Allocate and deallocate memory using different strategies
+    - Visualize memory usage and fragmentation in real-time
+    - Compare the efficiency of different memory allocation strategies
+
+### Implementation Details
+
+-   Custom memory segment and page data structures
+-   Process tracking with memory allocation information
+-   Efficient memory allocation and deallocation algorithms
+-   Fragmentation analysis and statistics
+-   Visual memory map representation
