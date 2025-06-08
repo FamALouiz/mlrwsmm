@@ -48,19 +48,41 @@ add_library(memory_manager STATIC
 )
 
 # Define reader target
-add_executable(reader libs/reader/reader.c)
-set_target_properties(reader PROPERTIES
+# add_executable(reader libs/reader/reader.c)
+# set_target_properties(reader PROPERTIES
+#     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+# )
+
+# Define writer target
+# add_executable(writer libs/writer/writer.c)
+# set_target_properties(writer PROPERTIES
+#     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+# )
+
+# Define multi-level system targets
+add_executable(writer_l1 libs/writer/writer_l1.c)
+set_target_properties(writer_l1 PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
 )
 
-# Define writer target
-add_executable(writer libs/writer/writer.c)
-set_target_properties(writer PROPERTIES
+add_executable(aggregator_l2 libs/aggregator/aggregator_l2.c)
+set_target_properties(aggregator_l2 PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+)
+
+add_executable(reader_l3 libs/reader/reader_l3.c)
+set_target_properties(reader_l3 PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
 )
 
 # Define main target
-add_executable(main src/main.c)
+# add_executable(main src/main.c)
+
+# Define multi-level main target
+add_executable(main_multilevel src/main_multilevel.c)
+set_target_properties(main_multilevel PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+)
 
 # Define memory simulator target
 add_executable(memory_simulator src/memory_simulator.c)
@@ -69,11 +91,15 @@ set_target_properties(memory_simulator PROPERTIES
 )
 
 # Link libraries
-target_link_libraries(reader logger platform ${PLATFORM_LIBS})
-target_link_libraries(writer logger platform ${PLATFORM_LIBS})
-target_link_libraries(main logger platform ${PLATFORM_LIBS})
+# target_link_libraries(reader logger platform ${PLATFORM_LIBS})
+# target_link_libraries(writer logger platform ${PLATFORM_LIBS})
+target_link_libraries(writer_l1 logger platform ${PLATFORM_LIBS})
+target_link_libraries(aggregator_l2 logger platform ${PLATFORM_LIBS})
+target_link_libraries(reader_l3 logger platform ${PLATFORM_LIBS})
+# target_link_libraries(main logger platform ${PLATFORM_LIBS})
+target_link_libraries(main_multilevel logger platform ${PLATFORM_LIBS})
 target_link_libraries(memory_simulator memory_manager logger platform ${PLATFORM_LIBS})
 
 # Install rules
-install(TARGETS reader writer main memory_simulator
+install(TARGETS writer_l1 aggregator_l2 reader_l3 main_multilevel memory_simulator # main reader writer
         RUNTIME DESTINATION bin)
